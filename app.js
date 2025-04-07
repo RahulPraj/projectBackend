@@ -7,6 +7,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const {Product} = require('./model/Product');
+const {Cart} = require('./model/Cart');
 
 //middleware
 app.use(cors());
@@ -212,12 +213,132 @@ app.patch("/product/edit/:id", async (req, res) => {
          product: updatedProduct
           });
       }
-    } catch (error) {
+    } catch(error) {
       res.status(400).json({
         message: "Internal Server Error Occured While Updating Product",
       });
     }
   });
+
+
+  //task-7 -> create route to delete product
+  app.delete('/product/delete/:id',async(req,res)=>{
+    try{
+        let {id} = req.params;
+        if(!id){
+            return res.status(400).json({
+               message: "id not found" 
+            })
+        }
+        let deletedProduct = await Product.findByIdAndDelete(id);
+        if(!deletedProduct){
+            return res.status(400).json({
+                message :"Product not found"
+            })
+        }
+        return res.status(200).json({
+            message: "Product deleted successfully",
+            product:deletedProduct
+
+        })
+
+    }catch(error) {
+      res.status(400).json({
+        message: "Internal Server Error",
+      });
+    }
+  })
+
+  //task-8 -> create route to see all product in cart
+  app.get('/cart', async(req,res)=>{
+    try{
+        let {token} = req.headers;
+        const decodedToken = jwt.verify(token, "supersecret")
+        const user = await User.findOne({email:decodedToken.email}).populate({
+            path: 'cart',
+            populate:{
+                path: 'products',
+                model: 'Product'
+            }
+        })
+        if(!user){
+            return res.status(400).json({
+                message: "User not found"
+            })
+        }
+        return res.status(200).json({
+            cart: user.cart
+        })
+    }catch(error) {
+      res.status(400).json({
+        message: "Internal Server Error",
+      });
+    }
+  })
+
+  //task-9 create route to add product in cart
+  app.post('/cart/add', async(req,res)=>{
+    try{
+        const body = req.body;
+        //getting product if from frontend
+        const productArray = body.products;
+        let totalPrice = 0;
+
+        //find the product and add product price in total
+        for(let item of productArray){
+            const product = await Product.findById(item);
+            if(product){
+                totalPrice += product.price;
+            }
+        }
+        const {token} = req.headers;
+        const decodedToken = jwt.verify(token, "supersecret");
+        const user = await User.findOne({email:decodedToken.email});
+        if(!user){
+            return res.status(400).json({
+                message: "User not found"
+            })
+        }
+
+        //checking if user already has a cart
+        let cart;
+        if(user.cart){
+            cart = await Cart.findById(user.cart).populate('products');
+            const existingProductsIds = cart.products.map((product)=>{
+                product._id.toString()
+            })
+
+            //if product is not already in the cart, add it to cart
+            productArray.forEach(async(productId)=>{
+                if(!existingProductsIds.includes(productId)){
+                    cart.products.push(productId);
+                    const product = await Product.findById(productId);
+                    totalPrice += product.price;
+                }
+            })
+            //updating cart.total with the new total price
+            cart.total = totalPrice;
+            await cart.save();
+        }else{
+            //create new cart
+            cart  = new Cart({
+              products:productArray,
+              total: totalPrice  
+            })
+            await cart.save();
+            user.cart = cart._id;
+            await user.save();
+        }
+        return res.status(200).json({
+            message: "product added to cart successfully",
+            cart:cart 
+        })
+    }catch(error) {
+      res.status(400).json({
+        message: "Internal Server Error",
+      });
+    }
+  })
 
 
 let PORT = 8080;
